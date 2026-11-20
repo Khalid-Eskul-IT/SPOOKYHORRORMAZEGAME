@@ -1,0 +1,1644 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<script id="lumi-canvas-guard">
+(function() {
+  if (window.__lumiCanvasGuard) return;
+  window.__lumiCanvasGuard = true;
+  var MAX_PX = 4096, MIN_FONT_PX = 12;
+  try {
+    var CP = HTMLCanvasElement.prototype;
+    var BOX = {width: 'clientWidth', height: 'clientHeight'}, D = {};
+    Object.keys(BOX).forEach(function(p) {
+      D[p] = Object.getOwnPropertyDescriptor(CP, p);
+    });
+    var tracking = function(el, p) {
+      var box = el[BOX[p]];
+      return !el.style[p] && box > 0 && box === D[p].get.call(el) &&
+          box === el['__lumiLast' + p];
+    };
+    var MAX = {width: 'maxWidth', height: 'maxHeight'};
+    var PAD = {width: ['paddingLeft', 'paddingRight'],
+               height: ['paddingTop', 'paddingBottom']};
+    var avail = function(el, p) {
+      var pe = el.parentElement;
+      if (!pe) return 0;
+      var cs = getComputedStyle(pe);
+      return pe[BOX[p]] - parseFloat(cs[PAD[p][0]]) -
+          parseFloat(cs[PAD[p][1]]);
+    };
+    Object.keys(BOX).forEach(function(p) {
+      var d = D[p];
+      if (!d || !d.set || !d.get) return;
+      Object.defineProperty(CP, p, {
+        configurable: true, enumerable: d.enumerable, get: d.get,
+        set: function(v) {
+          var n = +v, box = this[BOX[p]];
+          if (n > MAX_PX) n = MAX_PX;
+          if (n > box && tracking(this, p)) {
+            var el = this, pins = {};
+            Object.keys(BOX).forEach(function(q) {
+              if (tracking(el, q)) pins[q] = avail(el, q) ||
+                  el['__lumiBox' + q];
+            });
+            Object.keys(pins).forEach(function(q) {
+              el.style[q] = '100%';
+              el.style[MAX[q]] = pins[q] + 'px';
+            });
+            n = box;
+          }
+          this['__lumiBox' + p] = box;
+          this['__lumiLast' + p] = n;
+          d.set.call(this, isNaN(n) ? v : n);
+        }
+      });
+    });
+  } catch (e) {}
+  try {
+    var XP = CanvasRenderingContext2D.prototype;
+    var px = /(\d*\.?\d+)px/;
+    var floorFont = function(ctx) {
+      var f = ctx.font, m = px.exec(f);
+      if (m && +m[1] >= 4 && +m[1] < MIN_FONT_PX) ctx.font = f.replace(px, MIN_FONT_PX + 'px');
+    };
+    ['fillText', 'strokeText', 'measureText'].forEach(function(k) {
+      var o = XP[k];
+      if (typeof o !== 'function') return;
+      XP[k] = function() { floorFont(this); return o.apply(this, arguments); };
+    });
+  } catch (e) {}
+})();
+</script>
+
+<style id="lumi-runtime">
+@import url('https://fonts.googleapis.com/css2?family=Google+Sans+Flex:ital,wght@0,300..700;1,300..700&family=Google+Sans+Code:ital,wght,MONO@0,300..700,0..1;1,300..700,0..1&display=swap');
+
+:root {
+  --body-bg: transparent;
+  --ff-sans: 'Google Sans Flex', 'Google Sans Text', 'Google Sans', sans-serif;
+  --ff-mono: 'Google Sans Code', 'Google Sans Mono', monospace;
+  --lumi-sys-color--surface: #fdfcfc;
+  --lumi-sys-color--on-surface: #000000;
+  --lumi-sys-color--primary: #3186ff;
+  --lumi-sys-color--accent: #9dd2ff;
+  --lumi-sys-color--error: #de2d29;
+  --lumi-sys-color--positive: #008052;
+  --lumi-sys-color--stroke-default: #e3e3e3;
+  --surface: var(--lumi-sys-color--surface, #fdfcfc);
+  --on-surface: var(--lumi-sys-color--on-surface, #000000);
+  --primary: var(--lumi-sys-color--primary, #3186ff);
+  --stroke-default: var(--lumi-sys-color--stroke-default, #e3e3e3);
+}
+
+:root[data-theme="dark"], body.dark-mode {
+  --body-bg: #0f0f0f;
+  --lumi-sys-color--surface: #0f0f0f;
+  --lumi-sys-color--on-surface: #e0e0e0;
+  --lumi-sys-color--primary: #9dd2ff;
+  --lumi-sys-color--stroke-default: #2d2f38;
+}
+
+html, body {
+  background: var(--body-bg, #0f0f0f) !important;
+  color: var(--on-surface, #e0e0e0) !important;
+  margin: 0;
+  padding: 0;
+  overflow-y: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+.widget-container {
+  width: 100% !important;
+  max-width: 100% !important;
+  box-sizing: border-box;
+}
+</style>
+
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Spooky - Horror Maze</title>
+  <style>
+    .widget-container {
+      width: 100%;
+      min-height: 280px;
+      padding-inline: 0;
+      overflow-x: hidden;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      box-sizing: border-box;
+      font-family: var(--ff-sans);
+    }
+
+    @keyframes pulseWarn {
+      0% { opacity: 0.55; transform: scale(0.98); }
+      100% { opacity: 1; transform: scale(1.02); }
+    }
+
+    .game-viewport {
+      position: relative;
+      width: 100%;
+      height: 480px;
+      overflow: hidden;
+      border-radius: 12px;
+      background: #050508;
+      touch-action: none;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    .game-canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+
+    .hud-layer {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      padding: 12px;
+      box-sizing: border-box;
+      z-index: 10;
+    }
+
+    .hud-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 6px;
+      background: rgba(15, 15, 15, 0.78);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      padding: 8px 14px;
+      border-radius: 999px;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      color: #ffffff;
+      font-family: monospace;
+      font-size: 12px;
+    }
+
+    .hud-status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 600;
+    }
+
+    .hud-stats-group {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .badge-pill {
+      background: rgba(255, 255, 255, 0.1);
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-weight: 700;
+      letter-spacing: 0.3px;
+    }
+
+    .level-badge {
+      color: #9dd2ff;
+      border: 1px solid rgba(157, 210, 255, 0.3);
+    }
+
+    .speed-badge {
+      color: #6ee7b7;
+      border: 1px solid rgba(110, 231, 183, 0.3);
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #008052;
+      box-shadow: 0 0 8px #008052;
+    }
+
+    .status-dot.danger {
+      background: #de2d29;
+      box-shadow: 0 0 8px #de2d29;
+    }
+
+    .relic-counter {
+      color: #f5d77f;
+      font-weight: bold;
+      letter-spacing: 0.5px;
+    }
+
+    .crosshair {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: 6px;
+      height: 6px;
+      margin-top: -3px;
+      margin-left: -3px;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.5);
+      border: 1px solid rgba(0, 0, 0, 0.5);
+      pointer-events: none;
+    }
+
+    .touch-controls {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      width: 100%;
+      pointer-events: auto;
+    }
+
+    .dpad-container {
+      display: grid;
+      grid-template-columns: repeat(3, 42px);
+      grid-template-rows: repeat(3, 42px);
+      gap: 4px;
+      background: rgba(0, 0, 0, 0.4);
+      padding: 6px;
+      border-radius: 16px;
+      backdrop-filter: blur(4px);
+    }
+
+    .dpad-btn {
+      background: rgba(255, 255, 255, 0.15);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      color: #ffffff;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+      font-weight: bold;
+      touch-action: manipulation;
+      cursor: pointer;
+    }
+
+    .dpad-btn:active, .dpad-btn.active {
+      background: rgba(255, 255, 255, 0.4);
+    }
+
+    .look-hint {
+      color: rgba(255, 255, 255, 0.6);
+      font-size: 12px;
+      font-family: monospace;
+      background: rgba(0, 0, 0, 0.5);
+      padding: 6px 12px;
+      border-radius: 12px;
+      backdrop-filter: blur(4px);
+    }
+
+    .radar-container {
+      position: absolute;
+      top: 56px;
+      right: 12px;
+      width: 114px;
+      height: 114px;
+      background: rgba(10, 20, 12, 0.88);
+      border: 2px solid rgba(255, 255, 255, 0.22);
+      border-radius: 12px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.55);
+      pointer-events: auto;
+    }
+
+    .radar-canvas {
+      width: 104px;
+      height: 88px;
+      display: block;
+    }
+
+    .radar-label {
+      font-family: monospace;
+      font-size: 9px;
+      color: #aad5aa;
+      font-weight: bold;
+      padding-bottom: 2px;
+      text-align: center;
+      width: 100%;
+      background: rgba(0,0,0,0.45);
+    }
+
+    .modal-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(10, 10, 15, 0.95);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      box-sizing: border-box;
+      text-align: center;
+      z-index: 20;
+      pointer-events: auto;
+      transition: opacity 0.3s ease;
+    }
+
+    .modal-overlay.hidden {
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .modal-title {
+      font-size: 26px;
+      font-weight: 700;
+      color: #ffffff;
+      margin: 0 0 8px 0;
+      letter-spacing: -0.5px;
+    }
+
+    .modal-subtitle {
+      font-size: 13.5px;
+      color: rgba(255, 255, 255, 0.9);
+      margin: 0 0 16px 0;
+      max-width: 390px;
+      line-height: 1.45;
+    }
+
+    .modal-card {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      padding: 14px 16px;
+      border-radius: 12px;
+      margin-bottom: 18px;
+      width: 100%;
+      max-width: 340px;
+      box-sizing: border-box;
+    }
+
+    .controls-list {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      text-align: left;
+      font-size: 12px;
+      color: rgba(255, 255, 255, 0.85);
+      font-family: monospace;
+    }
+
+    .controls-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .controls-key {
+      background: rgba(255, 255, 255, 0.15);
+      padding: 2px 6px;
+      border-radius: 4px;
+      color: #fff;
+    }
+
+    .start-btn {
+      background: #3186ff;
+      color: #ffffff;
+      border: none;
+      padding: 12px 28px;
+      font-size: 14px;
+      font-weight: 600;
+      border-radius: 999px;
+      cursor: pointer;
+      box-shadow: 0 4px 14px rgba(49, 134, 255, 0.4);
+      transition: transform 0.15s ease, background-color 0.15s ease;
+    }
+
+    .start-btn:hover {
+      background: #2575fc;
+      transform: translateY(-1px);
+    }
+
+    .credits-timer-bar-container {
+      width: 100%;
+      max-width: 280px;
+      height: 6px;
+      background: rgba(255, 255, 255, 0.15);
+      border-radius: 999px;
+      margin-top: 14px;
+      overflow: hidden;
+      display: none;
+    }
+
+    .credits-timer-bar {
+      width: 100%;
+      height: 100%;
+      background: #ffd700;
+      transition: width 0.1s linear;
+      box-shadow: 0 0 8px rgba(255, 215, 0, 0.6);
+    }
+
+    .game-over-title {
+      color: #de2d29;
+      text-shadow: 0 0 12px rgba(222, 45, 41, 0.6);
+    }
+
+    .win-title {
+      color: #f5d77f;
+      text-shadow: 0 0 12px rgba(245, 215, 127, 0.6);
+    }
+  </style>
+
+  <!-- Include Three.js -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+</head>
+<body>
+  <div class="widget-container">
+    <div class="game-viewport" id="gameViewport">
+      <canvas id="gameCanvas" class="game-canvas"></canvas>
+      
+      <!-- HUD Overlay -->
+      <div class="hud-layer" id="hudLayer">
+        <div class="hud-header">
+          <div class="hud-status">
+            <div class="status-dot" id="statusDot"></div>
+            <span id="zoneLabel">ZONE: LOBBY</span>
+          </div>
+          <div class="hud-stats-group">
+            <span class="badge-pill level-badge" id="levelDisplay">LVL 1</span>
+            <span class="badge-pill speed-badge" id="speedDisplay">SPD: 24</span>
+            <span class="badge-pill" id="highestLevelDisplay" style="color: #f5d77f; border: 1px solid rgba(245, 215, 127, 0.3);">RECORD: L 1</span>
+            <span class="relic-counter" id="relicDisplay">RELICS: 0/5</span>
+          </div>
+        </div>
+
+        <!-- Proximity Warning Banner -->
+        <div id="proximityWarning" style="position: absolute; top: 62px; left: 12px; background: rgba(222, 45, 41, 0.88); color: #fff; padding: 6px 12px; border-radius: 8px; font-family: monospace; font-size: 11px; font-weight: bold; display: none; box-shadow: 0 0 12px rgba(222,45,41,0.8); animation: pulseWarn 0.6s infinite alternate;">
+          ⚠️ HATI HATI, SETANNYA SUDAH DEKAT!
+        </div>
+
+        <!-- Minimap Radar -->
+        <div class="radar-container" id="radarContainer" style="display: none;">
+          <canvas id="radarCanvas" class="radar-canvas" width="104" height="88"></canvas>
+          <div class="radar-label" id="radarLabel">RADAR: 5 RELIC</div>
+        </div>
+
+        <div class="crosshair"></div>
+
+        <div class="touch-controls">
+          <div class="dpad-container">
+            <div></div>
+            <button class="dpad-btn" id="btnUp">W</button>
+            <div></div>
+            <button class="dpad-btn" id="btnLeft">A</button>
+            <button class="dpad-btn" id="btnDown">S</button>
+            <button class="dpad-btn" id="btnRight">D</button>
+          </div>
+          <div class="look-hint">Drag screen to look</div>
+        </div>
+      </div>
+
+      <!-- Start / State Overlay -->
+      <div class="modal-overlay" id="modalOverlay">
+        <h1 class="modal-title" id="modalTitle">SPOOKY HORROR MAZE</h1>
+        <p class="modal-subtitle" id="modalSubtitle">Masuk ke portal di lobi untuk menuju labirin gelap. Kumpulkan 5 Golden Relics, temukan pintu EXIT, dan bertahan melewati level tanpa batas!</p>
+        
+        <div class="modal-card">
+          <div class="controls-list">
+            <div class="controls-item">
+              <span>WalkSpeed (Lvl 1)</span>
+              <span class="controls-key">Player 24 vs Hantu 13</span>
+            </div>
+            <div class="controls-item">
+              <span>Jumlah Hantu</span>
+              <span class="controls-key">Lvl 1:1 | 2-3:2 | 4-9:3 | 10+:5</span>
+            </div>
+            <div class="controls-item">
+              <span>Desain Labirin</span>
+              <span class="controls-key">Berbeda tiap Level (Mis: Lvl 2 Tanah)</span>
+            </div>
+            <div class="controls-item">
+              <span>Buff Tiap Level</span>
+              <span class="controls-key">+3 WalkSpeed tiap naik level</span>
+            </div>
+          </div>
+        </div>
+
+        <button class="start-btn" id="startBtn">MASUK LOBI</button>
+        
+        <div class="credits-timer-bar-container" id="creditsTimerContainer">
+          <div class="credits-timer-bar" id="creditsTimerBar"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // --- Procedural Texture Generators ---
+    function createProceduralTextures() {
+      const createNoiseTexture = (color1, color2, pattern = 'brick') => {
+        const canvas = document.createElement('canvas');
+        canvas.width = 256;
+        canvas.height = 256;
+        const ctx = canvas.getContext('2d');
+
+        if (pattern === 'brick') {
+          ctx.fillStyle = color1;
+          ctx.fillRect(0, 0, 256, 256);
+          ctx.fillStyle = color2;
+          const rows = 16, cols = 8;
+          const rh = 256 / rows, cw = 256 / cols;
+          for (let r = 0; r < rows; r++) {
+            const offset = (r % 2) * (cw / 2);
+            for (let c = -1; c < cols + 1; c++) {
+              ctx.fillRect(c * cw + offset + 2, r * rh + 2, cw - 4, rh - 4);
+            }
+          }
+        } else if (pattern === 'grass') {
+          ctx.fillStyle = color1;
+          ctx.fillRect(0, 0, 256, 256);
+          ctx.fillStyle = color2;
+          for (let i = 0; i < 3000; i++) {
+            ctx.fillRect(Math.random() * 256, Math.random() * 256, 2, 4);
+          }
+        } else if (pattern === 'dirt') {
+          ctx.fillStyle = color1;
+          ctx.fillRect(0, 0, 256, 256);
+          ctx.fillStyle = color2;
+          for (let i = 0; i < 5000; i++) {
+            ctx.fillRect(Math.random() * 256, Math.random() * 256, 3, 3);
+          }
+        } else if (pattern === 'stone') {
+          ctx.fillStyle = color1;
+          ctx.fillRect(0, 0, 256, 256);
+          ctx.fillStyle = color2;
+          for (let i = 0; i < 1200; i++) {
+            ctx.beginPath();
+            ctx.arc(Math.random() * 256, Math.random() * 256, Math.random() * 6 + 2, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        } else if (pattern === 'wood') {
+          ctx.fillStyle = color1;
+          ctx.fillRect(0, 0, 256, 256);
+          ctx.fillStyle = color2;
+          for (let i = 0; i < 256; i += 8) {
+            ctx.fillRect(0, i, 256, 2);
+          }
+        } else if (pattern === 'hedge') {
+          ctx.fillStyle = color1;
+          ctx.fillRect(0, 0, 256, 256);
+          ctx.fillStyle = color2;
+          for (let i = 0; i < 4000; i++) {
+            ctx.beginPath();
+            ctx.arc(Math.random() * 256, Math.random() * 256, Math.random() * 3 + 1, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        }
+
+        const texture = new THREE.CanvasTexture(canvas);
+        texture.wrapS = THREE.RepeatWrapping;
+        texture.wrapT = THREE.RepeatWrapping;
+        return texture;
+      };
+
+      const createGhostFaceTexture = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = 256;
+        canvas.height = 256;
+        const ctx = canvas.getContext('2d');
+
+        ctx.fillStyle = '#d0d8e0';
+        ctx.fillRect(0, 0, 256, 256);
+
+        ctx.fillStyle = '#0a0002';
+        ctx.beginPath();
+        ctx.ellipse(80, 95, 30, 40, 0, 0, Math.PI * 2);
+        ctx.ellipse(176, 95, 30, 40, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = '#ff1100';
+        ctx.beginPath();
+        ctx.arc(80, 95, 8, 0, Math.PI * 2);
+        ctx.arc(176, 95, 8, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = '#050001';
+        ctx.beginPath();
+        ctx.ellipse(128, 180, 35, 55, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        const texture = new THREE.CanvasTexture(canvas);
+        return texture;
+      };
+
+      return {
+        brick: createNoiseTexture('#3b2219', '#5c3324', 'brick'),
+        grass: createNoiseTexture('#152814', '#254423', 'grass'),
+        dirt: createNoiseTexture('#3d2817', '#543822', 'dirt'),
+        stone: createNoiseTexture('#22252a', '#3a3f47', 'stone'),
+        wood: createNoiseTexture('#2a1a0e', '#422a18', 'wood'),
+        hedge: createNoiseTexture('#0d1f0c', '#1b3b19', 'hedge'),
+        ghostFace: createGhostFaceTexture()
+      };
+    }
+
+    // --- Procedural 19x19 Maze Generator (Connected loops, no dead ends) ---
+    function generateProceduralMazeGrid(seed) {
+      const rows = 19;
+      const cols = 19;
+      const grid = [];
+      for (let r = 0; r < rows; r++) {
+        const row = [];
+        for (let c = 0; c < cols; c++) {
+          row.push(1); // 1 = Wall
+        }
+        grid.push(row);
+      }
+
+      let s = seed * 9973;
+      const rnd = () => {
+        s = (s * 16807) % 2147483647;
+        return (s - 1) / 2147483646;
+      };
+
+      // Carve primary DFS tree
+      const stack = [{ r: 1, c: 1 }];
+      grid[1][1] = 0;
+
+      while (stack.length > 0) {
+        const curr = stack[stack.length - 1];
+        const dirs = [
+          { dr: -2, dc: 0 },
+          { dr: 2, dc: 0 },
+          { dr: 0, dc: -2 },
+          { dr: 0, dc: 2 }
+        ].sort(() => rnd() - 0.5);
+
+        let carved = false;
+        for (const d of dirs) {
+          const nr = curr.r + d.dr;
+          const nc = curr.c + d.dc;
+          if (nr > 0 && nr < rows - 1 && nc > 0 && nc < cols - 1 && grid[nr][nc] === 1) {
+            grid[curr.r + d.dr / 2][curr.c + d.dc / 2] = 0;
+            grid[nr][nc] = 0;
+            stack.push({ r: nr, c: nc });
+            carved = true;
+            break;
+          }
+        }
+        if (!carved) {
+          stack.pop();
+        }
+      }
+
+      // Add extra connecting corridors to create loops and eliminate dead ends
+      for (let r = 1; r < rows - 1; r += 2) {
+        for (let c = 1; c < cols - 1; c += 2) {
+          if (rnd() < 0.45) {
+            if (r + 2 < rows - 1) grid[r + 1][c] = 0;
+            if (c + 2 < cols - 1) grid[r][c + 1] = 0;
+          }
+        }
+      }
+
+      // Ensure open spawn at (1,1)
+      grid[1][1] = 0;
+      grid[1][2] = 0;
+      grid[2][1] = 0;
+
+      // Place Exit Gate at bottom right corner (16, 18) with open access
+      grid[16][18] = 3;
+      grid[16][17] = 0;
+      grid[15][18] = 0;
+      grid[17][18] = 0;
+
+      return grid;
+    }
+
+    const CELL_SIZE = 4;
+
+    // Distinct open spawn points in the maze for multiple ghosts
+    const GHOST_SPAWN_CELLS = [
+      { c: 1, r: 17 },   // Ghost 1: Bottom-Left corner
+      { c: 17, r: 1 },   // Ghost 2: Top-Right corner
+      { c: 15, r: 17 },  // Ghost 3: Bottom-Right area
+      { c: 17, r: 9 },   // Ghost 4: Middle-Right corridor
+      { c: 9, r: 17 }    // Ghost 5: Bottom-Center corridor
+    ];
+
+    const ROBLOX_SPEED_SCALE = 0.28125;
+    const BASE_PLAYER_ROBLOX_SPEED = 24; // Player speed = 24
+    const PLAYER_SPEED_INCREMENT = 3;    // +3 WalkSpeed per level
+    const BASE_GHOST_ROBLOX_SPEED = 13;  // Ghost base speed = 13
+    const GHOST_SPEED_INCREMENT_EVERY_10 = 12; // +12 speed every 10 levels
+
+    class GameEngine {
+      constructor() {
+        this.state = 'LOBBY';
+        this.relicsCollected = 0;
+        this.currentLevel = 1;
+        this.highestLevelReached = parseInt(localStorage.getItem('lumi_horror_highest_level') || '1', 10);
+        this.pulseTime = 0;
+
+        this.keys = { forward: false, backward: false, left: false, right: false };
+        this.touchLook = { active: false, startX: 0, startY: 0 };
+
+        this.pitch = 0;
+        this.yaw = 0;
+
+        this.playerPos = new THREE.Vector3(0, 1.7, 10);
+        this.playerRadius = 0.52;
+
+        this.ghosts = [];
+        this.ghostActive = false;
+
+        this.lobbyColliders = [];
+        this.mazeColliders = [];
+        this.emptyCells = [];
+        this.relics = [];
+        this.exitGateMesh = null;
+        this.exitGateCollider = null;
+        this.exitTriggerBox = null;
+        this.portalMesh = null;
+        this.mazePathToExit = [];
+
+        this.initThree();
+        this.buildLobby();
+        this.buildMazeForLevel(1);
+        this.setupEvents();
+        this.updateHudStats();
+        this.animate();
+      }
+
+      // Total relics needed increases by +1 on each level (Level 1 = 5, Level 2 = 6, etc.)
+      getTotalRelicsForLevel(level) {
+        return 4 + level;
+      }
+
+      getPlayerRobloxSpeed() {
+        return BASE_PLAYER_ROBLOX_SPEED + (this.currentLevel - 1) * PLAYER_SPEED_INCREMENT;
+      }
+
+      getGhostRobloxSpeed() {
+        const tier = Math.floor((this.currentLevel - 1) / 10);
+        return BASE_GHOST_ROBLOX_SPEED + (tier * GHOST_SPEED_INCREMENT_EVERY_10);
+      }
+
+      getGhostCountForLevel(level) {
+        if (level === 1) return 1;
+        if (level >= 2 && level <= 3) return 2;
+        if (level >= 4 && level <= 9) return 3;
+        return 5;
+      }
+
+      updateHudStats() {
+        const lvlEl = document.getElementById('levelDisplay');
+        const spdEl = document.getElementById('speedDisplay');
+        const highEl = document.getElementById('highestLevelDisplay');
+        const relEl = document.getElementById('relicDisplay');
+        const totalRelics = this.getTotalRelicsForLevel(this.currentLevel);
+        if (lvlEl) lvlEl.textContent = `LVL ${this.currentLevel}`;
+        if (spdEl) spdEl.textContent = `SPD: ${this.getPlayerRobloxSpeed()}`;
+        if (highEl) highEl.textContent = `RECORD: L ${this.highestLevelReached}`;
+        if (relEl) relEl.textContent = `RELICS: ${this.relicsCollected}/${totalRelics}`;
+      }
+
+      initThree() {
+        this.container = document.getElementById('gameViewport');
+        this.canvas = document.getElementById('gameCanvas');
+
+        this.scene = new THREE.Scene();
+        this.scene.background = new THREE.Color(0x05050a);
+        this.scene.fog = new THREE.FogExp2(0x05050a, 0.04);
+
+        this.camera = new THREE.PerspectiveCamera(70, this.container.clientWidth / this.container.clientHeight, 0.1, 100);
+        this.camera.position.copy(this.playerPos);
+
+        this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true });
+        this.renderer.setSize(this.container.clientWidth, this.container.clientHeight);
+        this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+
+        this.textures = createProceduralTextures();
+
+        this.flashlight = new THREE.SpotLight(0xfff5e0, 2.5, 22, Math.PI / 5, 0.5, 1.5);
+        this.flashlight.position.set(0, 0, 0);
+        this.camera.add(this.flashlight);
+        this.camera.add(this.flashlight.target);
+        this.flashlight.target.position.set(0, 0, -1);
+        this.scene.add(this.camera);
+
+        const ambient = new THREE.AmbientLight(0x1a1a28, 0.3);
+        this.scene.add(ambient);
+      }
+
+      buildLobby() {
+        this.lobbyGroup = new THREE.Group();
+
+        const floorGeo = new THREE.PlaneGeometry(40, 40);
+        const floorMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1f, roughness: 0.8 });
+        const floor = new THREE.Mesh(floorGeo, floorMat);
+        floor.rotation.x = -Math.PI / 2;
+        this.lobbyGroup.add(floor);
+
+        const houseMat = new THREE.MeshStandardMaterial({ map: this.textures.brick, roughness: 0.7 });
+        const roofMat = new THREE.MeshStandardMaterial({ map: this.textures.wood, roughness: 0.6 });
+
+        const createHouse = (x, z, w, h, d) => {
+          const house = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), houseMat);
+          house.position.set(x, h / 2, z);
+          this.lobbyGroup.add(house);
+          this.lobbyColliders.push(new THREE.Box3().setFromObject(house));
+
+          const roof = new THREE.Mesh(new THREE.ConeGeometry(Math.max(w, d) * 0.75, 3, 4), roofMat);
+          roof.position.set(x, h + 1.5, z);
+          roof.rotation.y = Math.PI / 4;
+          this.lobbyGroup.add(roof);
+        };
+
+        createHouse(-12, 10, 8, 6, 8);
+        createHouse(12, 10, 8, 6, 8);
+        createHouse(-12, -2, 8, 6, 8);
+        createHouse(12, -2, 8, 6, 8);
+
+        const fenceMat = new THREE.MeshStandardMaterial({ map: this.textures.wood, roughness: 0.9 });
+        const backFence = new THREE.Mesh(new THREE.BoxGeometry(40, 3, 1), fenceMat);
+        backFence.position.set(0, 1.5, 18);
+        this.lobbyGroup.add(backFence);
+        this.lobbyColliders.push(new THREE.Box3().setFromObject(backFence));
+
+        const portalGeo = new THREE.TorusGeometry(1.5, 0.15, 16, 32);
+        const portalMat = new THREE.MeshBasicMaterial({ color: 0x00ffff, wireframe: true });
+        this.portalMesh = new THREE.Mesh(portalGeo, portalMat);
+        this.portalMesh.position.set(0, 1.8, -8);
+        this.lobbyGroup.add(this.portalMesh);
+
+        const portalLight = new THREE.PointLight(0x00ffff, 2, 8);
+        portalLight.position.set(0, 1.8, -8);
+        this.lobbyGroup.add(portalLight);
+
+        this.scene.add(this.lobbyGroup);
+      }
+
+      // Rebuild maze dynamically per level (e.g. Level 2 = Muddy Dirt Theme, Level 3 = Stone, etc.)
+      buildMazeForLevel(level) {
+        if (this.mazeGroup) {
+          this.scene.remove(this.mazeGroup);
+        }
+
+        this.mazeGroup = new THREE.Group();
+        this.mazeGroup.visible = false;
+        this.mazeColliders = [];
+        this.emptyCells = [];
+        this.relics = [];
+
+        this.currentMazeGrid = generateProceduralMazeGrid(level);
+
+        let floorTex = this.textures.grass;
+        let wallTex = this.textures.hedge;
+
+        const themeMod = (level - 1) % 4;
+        if (themeMod === 1) {
+          floorTex = this.textures.dirt;
+          wallTex = this.textures.brick;
+        } else if (themeMod === 2) {
+          floorTex = this.textures.stone;
+          wallTex = this.textures.stone;
+        } else if (themeMod === 3) {
+          floorTex = this.textures.wood;
+          wallTex = this.textures.wood;
+        }
+
+        const rows = this.currentMazeGrid.length;
+        const cols = this.currentMazeGrid[0].length;
+        const wallMat = new THREE.MeshStandardMaterial({ map: wallTex, roughness: 0.85 });
+        const floorMat = new THREE.MeshStandardMaterial({ map: floorTex, roughness: 0.9 });
+
+        const mazeWidth = cols * CELL_SIZE;
+        const mazeHeight = rows * CELL_SIZE;
+        const floor = new THREE.Mesh(new THREE.PlaneGeometry(mazeWidth, mazeHeight), floorMat);
+        floor.rotation.x = -Math.PI / 2;
+        floor.position.set(mazeWidth / 2 - CELL_SIZE / 2, 0, mazeHeight / 2 - CELL_SIZE / 2);
+        this.mazeGroup.add(floor);
+
+        for (let r = 0; r < rows; r++) {
+          for (let c = 0; c < cols; c++) {
+            const val = this.currentMazeGrid[r][c];
+            const x = c * CELL_SIZE;
+            const z = r * CELL_SIZE;
+
+            if (val === 1) {
+              const wall = new THREE.Mesh(new THREE.BoxGeometry(CELL_SIZE, 4, CELL_SIZE), wallMat);
+              wall.position.set(x, 2, z);
+              this.mazeGroup.add(wall);
+              this.mazeColliders.push(new THREE.Box3().setFromObject(wall));
+            } else if (val === 0) {
+              if (!(r === 1 && c === 1)) {
+                this.emptyCells.push({ x, z });
+              }
+            } else if (val === 3) {
+              this.buildExitGate(x, z);
+            }
+          }
+        }
+
+        const relicGeo = new THREE.OctahedronGeometry(0.4, 0);
+        const relicMat = new THREE.MeshStandardMaterial({ color: 0xffd700, metalness: 0.2, roughness: 0.1, emissive: 0x443300 });
+
+        const totalRelics = this.getTotalRelicsForLevel(level);
+        for (let i = 0; i < totalRelics; i++) {
+          const relic = new THREE.Mesh(relicGeo, relicMat);
+          const light = new THREE.PointLight(0xffd700, 1, 4);
+          relic.add(light);
+          this.mazeGroup.add(relic);
+          this.relics.push(relic);
+        }
+
+        this.randomizeRelicPositions();
+        this.scene.add(this.mazeGroup);
+      }
+
+      randomizeRelicPositions() {
+        const shuffled = [...this.emptyCells].sort(() => Math.random() - 0.5);
+        for (let i = 0; i < this.relics.length && i < shuffled.length; i++) {
+          this.relics[i].position.set(shuffled[i].x, 1.2, shuffled[i].z);
+          this.relics[i].visible = true;
+        }
+      }
+
+      buildExitGate(x, z) {
+        const pillarMat = new THREE.MeshStandardMaterial({ map: this.textures.brick, roughness: 0.8 });
+        const barMat = new THREE.MeshStandardMaterial({ color: 0x111111, metalness: 0.2 });
+
+        const p1 = new THREE.Mesh(new THREE.BoxGeometry(0.8, 4, 0.8), pillarMat);
+        p1.position.set(x - 1.5, 2, z);
+        const p2 = new THREE.Mesh(new THREE.BoxGeometry(0.8, 4, 0.8), pillarMat);
+        p2.position.set(x + 1.5, 2, z);
+
+        this.mazeGroup.add(p1);
+        this.mazeGroup.add(p2);
+        this.lobbyColliders && this.lobbyColliders.push(new THREE.Box3().setFromObject(p1));
+        this.mazeColliders.push(new THREE.Box3().setFromObject(p1));
+        this.mazeColliders.push(new THREE.Box3().setFromObject(p2));
+
+        const gateGroup = new THREE.Group();
+        for (let i = -1.2; i <= 1.2; i += 0.4) {
+          const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 3.5), barMat);
+          bar.position.set(i, 2, 0);
+          gateGroup.add(bar);
+        }
+        gateGroup.position.set(x, 0, z);
+        this.mazeGroup.add(gateGroup);
+        this.exitGateMesh = gateGroup;
+
+        this.exitGateCollider = new THREE.Box3().setFromObject(gateGroup);
+        this.mazeColliders.push(this.exitGateCollider);
+
+        const voidFloor = new THREE.Mesh(new THREE.PlaneGeometry(8, 12), new THREE.MeshBasicMaterial({ color: 0x020205 }));
+        voidFloor.rotation.x = -Math.PI / 2;
+        voidFloor.position.set(x, 0, z + 4);
+        this.mazeGroup.add(voidFloor);
+
+        // Expanded exit trigger bounds so player effortlessly triggers the win condition
+        this.exitTriggerBox = new THREE.Box3(
+          new THREE.Vector3(x - 2.2, 0, z - 2.0),
+          new THREE.Vector3(x + 2.2, 5, z + 6.0)
+        );
+      }
+
+      createGhostMesh(index) {
+        const ghostGroup = new THREE.Group();
+        const bodyGeo = new THREE.CylinderGeometry(0.4, 0.8, 2.2, 16);
+        const tintColors = [0x111115, 0x1a0c12, 0x0e141c, 0x19120c, 0x150c1c];
+        const bodyMat = new THREE.MeshStandardMaterial({
+          color: tintColors[index % tintColors.length],
+          roughness: 0.9,
+          transparent: true,
+          opacity: 0.88
+        });
+        const body = new THREE.Mesh(bodyGeo, bodyMat);
+        body.position.y = 1.1;
+        ghostGroup.add(body);
+
+        const headGeo = new THREE.SphereGeometry(0.45, 16, 16);
+        const headMat = new THREE.MeshStandardMaterial({ map: this.textures.ghostFace, roughness: 0.5 });
+        const head = new THREE.Mesh(headGeo, headMat);
+        head.position.y = 2.1;
+        head.rotation.y = -Math.PI / 2;
+        ghostGroup.add(head);
+
+        const redLight = new THREE.PointLight(0xff1100, 1.5, 5.5);
+        redLight.position.set(0, 2.1, 0.3);
+        ghostGroup.add(redLight);
+
+        ghostGroup.visible = false;
+        this.mazeGroup.add(ghostGroup);
+        return ghostGroup;
+      }
+
+      spawnGhostsForLevel(level) {
+        this.ghosts.forEach(g => {
+          if (g.mesh) this.mazeGroup.remove(g.mesh);
+        });
+        this.ghosts = [];
+
+        const count = this.getGhostCountForLevel(level);
+        for (let i = 0; i < count; i++) {
+          const spawnCell = GHOST_SPAWN_CELLS[i % GHOST_SPAWN_CELLS.length];
+          const mesh = this.createGhostMesh(i);
+          mesh.position.set(spawnCell.c * CELL_SIZE, 0, spawnCell.r * CELL_SIZE);
+          this.ghosts.push({
+            id: i,
+            mesh: mesh,
+            spawnCell: spawnCell
+          });
+        }
+      }
+
+      setupEvents() {
+        window.addEventListener('keydown', (e) => this.handleKey(e.code, true));
+        window.addEventListener('keyup', (e) => this.handleKey(e.code, false));
+
+        const bindBtn = (id, key) => {
+          const btn = document.getElementById(id);
+          if (!btn) return;
+          btn.addEventListener('pointerdown', (e) => { e.preventDefault(); this.keys[key] = true; btn.classList.add('active'); });
+          btn.addEventListener('pointerup', (e) => { e.preventDefault(); this.keys[key] = false; btn.classList.remove('active'); });
+          btn.addEventListener('pointerleave', () => { this.keys[key] = false; btn.classList.remove('active'); });
+        };
+        bindBtn('btnUp', 'forward');
+        bindBtn('btnDown', 'backward');
+        bindBtn('btnLeft', 'left');
+        bindBtn('btnRight', 'right');
+
+        this.canvas.addEventListener('pointerdown', (e) => {
+          this.touchLook.active = true;
+          this.touchLook.startX = e.clientX;
+          this.touchLook.startY = e.clientY;
+        });
+
+        window.addEventListener('pointermove', (e) => {
+          if (!this.touchLook.active) return;
+          const dx = e.clientX - this.touchLook.startX;
+          const dy = e.clientY - this.touchLook.startY;
+          this.touchLook.startX = e.clientX;
+          this.touchLook.startY = e.clientY;
+
+          this.yaw -= dx * 0.004;
+          this.pitch -= dy * 0.004;
+          this.pitch = Math.max(-Math.PI / 2.2, Math.min(Math.PI / 2.2, this.pitch));
+        });
+
+        window.addEventListener('pointerup', () => { this.touchLook.active = false; });
+
+        window.addEventListener('resize', () => {
+          const w = this.container.clientWidth;
+          const h = this.container.clientHeight;
+          this.camera.aspect = w / h;
+          this.camera.updateProjectionMatrix();
+          this.renderer.setSize(w, h);
+        });
+
+        document.getElementById('startBtn').addEventListener('click', () => {
+          if (this.state === 'GAMEOVER') {
+            this.currentLevel = 1;
+            this.buildMazeForLevel(1);
+            this.resetRoundToLobby();
+          } else if (this.state === 'WIN') {
+            this.buildMazeForLevel(this.currentLevel);
+            this.resetRoundToLobby();
+          } else {
+            this.startGame();
+          }
+        });
+      }
+
+      handleKey(code, isPressed) {
+        if (code === 'KeyW' || code === 'ArrowUp') this.keys.forward = isPressed;
+        if (code === 'KeyS' || code === 'ArrowDown') this.keys.backward = isPressed;
+        if (code === 'KeyA' || code === 'ArrowLeft') this.keys.left = isPressed;
+        if (code === 'KeyD' || code === 'ArrowRight') this.keys.right = isPressed;
+      }
+
+      startGame() {
+        this.state = 'LOBBY';
+        this.updateHudStats();
+        document.getElementById('modalOverlay').classList.add('hidden');
+      }
+
+      resetRoundToLobby() {
+        this.state = 'LOBBY';
+        this.relicsCollected = 0;
+        this.playerPos.set(0, 1.7, 10);
+        this.yaw = 0;
+        this.pitch = 0;
+
+        this.randomizeRelicPositions();
+        this.ghostActive = false;
+        this.ghosts.forEach(g => {
+          if (g.mesh) g.mesh.visible = false;
+        });
+
+        if (this.exitGateMesh) {
+          this.exitGateMesh.rotation.y = 0;
+        }
+        if (this.exitGateCollider && !this.mazeColliders.includes(this.exitGateCollider)) {
+          this.mazeColliders.push(this.exitGateCollider);
+        }
+
+        const warnBanner = document.getElementById('proximityWarning');
+        if (warnBanner) warnBanner.style.display = 'none';
+
+        this.updateHudStats();
+        document.getElementById('radarLabel').textContent = 'RADAR: 5 RELIC';
+        document.getElementById('zoneLabel').textContent = 'ZONE: LOBBY';
+        document.getElementById('statusDot').className = 'status-dot';
+        document.getElementById('radarContainer').style.display = 'none';
+        document.getElementById('modalOverlay').classList.add('hidden');
+
+        this.lobbyGroup.visible = true;
+        this.mazeGroup.visible = false;
+      }
+
+      transitionToMaze() {
+        this.state = 'CREDITS';
+        this.lobbyGroup.visible = false;
+        this.mazeGroup.visible = false;
+
+        const ghostCount = this.getGhostCountForLevel(this.currentLevel);
+        const playerSpd = this.getPlayerRobloxSpeed();
+        const ghostSpd = this.getGhostRobloxSpeed();
+        const totalRelics = this.getTotalRelicsForLevel(this.currentLevel);
+        const radarNote = this.currentLevel >= 2 ? ' • Radar Hantu di Map AKTIF' : '';
+        const themeMod = (this.currentLevel - 1) % 4;
+        const themeName = themeMod === 1 ? 'Tanah / Dirt' : themeMod === 2 ? 'Batu Dungeon' : themeMod === 3 ? 'Kayu Catacomb' : 'Hutan Labirin';
+
+        const modal = document.getElementById('modalOverlay');
+        document.getElementById('modalTitle').textContent = 'By: Khalid 7C';
+        document.getElementById('modalTitle').className = 'modal-title';
+        document.getElementById('modalSubtitle').innerHTML = `
+          <b>Level ${this.currentLevel} (${themeName})</b><br><br>
+          • Target Relic: <b>${totalRelics} Relics</b> (+1 tiap level)<br>
+          • Speed Kamu: <b>${playerSpd}</b> | Hantu: <b>${ghostSpd}</b><br>
+          • Jumlah Hantu: <b>${ghostCount} Hantu</b>${radarNote}
+        `;
+        document.getElementById('startBtn').style.display = 'none';
+        modal.classList.remove('hidden');
+        
+        const timerContainer = document.getElementById('creditsTimerContainer');
+        const timerBar = document.getElementById('creditsTimerBar');
+        timerContainer.style.display = 'block';
+        timerBar.style.width = '100%';
+
+        const totalTime = 10.0;
+        let timeLeft = totalTime;
+        const intervalMs = 100;
+
+        if (this.creditsInterval) clearInterval(this.creditsInterval);
+
+        this.creditsInterval = setInterval(() => {
+          timeLeft -= (intervalMs / 1000);
+          const pct = Math.max(0, (timeLeft / totalTime) * 100);
+          timerBar.style.width = pct + '%';
+
+          if (timeLeft <= 0) {
+            clearInterval(this.creditsInterval);
+            this.creditsInterval = null;
+            timerContainer.style.display = 'none';
+
+            this.state = 'PLAYING';
+            this.mazeGroup.visible = true;
+            this.playerPos.set(1 * CELL_SIZE, 1.7, 1 * CELL_SIZE);
+            this.spawnGhostsForLevel(this.currentLevel);
+            this.updateHudStats();
+
+            document.getElementById('radarContainer').style.display = 'flex';
+            modal.classList.add('hidden');
+            document.getElementById('startBtn').style.display = 'inline-block';
+
+            setTimeout(() => {
+              if (this.state === 'PLAYING') {
+                this.ghostActive = true;
+                document.getElementById('statusDot').className = 'status-dot danger';
+              }
+            }, 2500);
+
+            document.getElementById('zoneLabel').textContent = `ZONE: SPOOKY MAZE (LVL ${this.currentLevel})`;
+          }
+        }, intervalMs);
+      }
+
+      worldToGrid(pos) {
+        const c = Math.floor(pos.x / CELL_SIZE + 0.5);
+        const r = Math.floor(pos.z / CELL_SIZE + 0.5);
+        return { r, c };
+      }
+
+      findPathBFS(start, goal) {
+        const rows = this.currentMazeGrid.length;
+        const cols = this.currentMazeGrid[0].length;
+        const queue = [[start]];
+        const visited = new Set();
+        visited.add(`${start.r},${start.c}`);
+
+        while (queue.length > 0) {
+          const path = queue.shift();
+          const curr = path[path.length - 1];
+
+          if (curr.r === goal.r && curr.c === goal.c) {
+            return path.slice(1);
+          }
+
+          const neighbors = [
+            { r: curr.r - 1, c: curr.c },
+            { r: curr.r + 1, c: curr.c },
+            { r: curr.r, c: curr.c - 1 },
+            { r: curr.r, c: curr.c + 1 }
+          ].sort(() => Math.random() - 0.5);
+
+          for (const n of neighbors) {
+            if (n.r >= 0 && n.r < rows && n.c >= 0 && n.c < cols) {
+              if (this.currentMazeGrid[n.r][n.c] !== 1 && !visited.has(`${n.r},${n.c}`)) {
+                visited.add(`${n.r},${n.c}`);
+                queue.push([...path, n]);
+              }
+            }
+          }
+        }
+        return [];
+      }
+
+      resolvePlayerCollisions(desiredPos, colliders) {
+        const resolved = desiredPos.clone();
+        const r = this.playerRadius;
+
+        for (let iter = 0; iter < 3; iter++) {
+          for (let i = 0; i < colliders.length; i++) {
+            const box = colliders[i];
+            if (resolved.y < box.min.y - 0.5 || resolved.y > box.max.y + 0.5) continue;
+
+            const closestX = Math.max(box.min.x, Math.min(resolved.x, box.max.x));
+            const closestZ = Math.max(box.min.z, Math.min(resolved.z, box.max.z));
+
+            const dx = resolved.x - closestX;
+            const dz = resolved.z - closestZ;
+            const distSq = dx * dx + dz * dz;
+
+            if (distSq < r * r) {
+              const dist = Math.sqrt(distSq);
+              if (dist > 0.0001) {
+                const overlap = r - dist;
+                resolved.x += (dx / dist) * overlap;
+                resolved.z += (dz / dist) * overlap;
+              } else {
+                const penLeft = Math.abs(resolved.x - box.min.x);
+                const penRight = Math.abs(box.max.x - resolved.x);
+                const penTop = Math.abs(resolved.z - box.min.z);
+                const penBottom = Math.abs(box.max.z - resolved.z);
+                const minPen = Math.min(penLeft, penRight, penTop, penBottom);
+                if (minPen === penLeft) resolved.x = box.min.x - r;
+                else if (minPen === penRight) resolved.x = box.max.x + r;
+                else if (minPen === penTop) resolved.z = box.min.z - r;
+                else resolved.z = box.max.z + r;
+              }
+            }
+          }
+        }
+        return resolved;
+      }
+
+      updatePlayer(delta) {
+        if (this.state !== 'LOBBY' && this.state !== 'PLAYING') return;
+
+        this.camera.rotation.set(0, 0, 0, 'YXZ');
+        this.camera.rotation.y = this.yaw;
+        this.camera.rotation.x = this.pitch;
+
+        const moveDir = new THREE.Vector3();
+        if (this.keys.forward) moveDir.z -= 1;
+        if (this.keys.backward) moveDir.z += 1;
+        if (this.keys.left) moveDir.x -= 1;
+        if (this.keys.right) moveDir.x += 1;
+
+        const playerRobloxSpeed = this.getPlayerRobloxSpeed();
+        const worldSpeed = playerRobloxSpeed * ROBLOX_SPEED_SCALE;
+
+        if (moveDir.lengthSq() > 0) {
+          moveDir.normalize();
+          moveDir.applyAxisAngle(new THREE.Vector3(0, 1, 0), this.yaw);
+
+          const stepDist = worldSpeed * delta;
+          const colliders = this.state === 'LOBBY' ? this.lobbyColliders : this.mazeColliders;
+
+          const targetPos = this.playerPos.clone();
+          targetPos.x += moveDir.x * stepDist;
+          const afterX = this.resolvePlayerCollisions(targetPos, colliders);
+
+          afterX.z += moveDir.z * stepDist;
+          const finalPos = this.resolvePlayerCollisions(afterX, colliders);
+
+          this.playerPos.copy(finalPos);
+        }
+
+        this.camera.position.copy(this.playerPos);
+
+        if (this.state === 'LOBBY') {
+          if (this.portalMesh && this.playerPos.distanceTo(this.portalMesh.position) < 1.8) {
+            this.transitionToMaze();
+          }
+        }
+
+        if (this.state === 'PLAYING') {
+          const totalRelics = this.getTotalRelicsForLevel(this.currentLevel);
+          for (let i = 0; i < this.relics.length; i++) {
+            const relic = this.relics[i];
+            if (relic.visible && this.playerPos.distanceTo(relic.position) < 1.4) {
+              relic.visible = false;
+              this.relicsCollected++;
+              this.updateHudStats();
+
+              if (this.relicsCollected >= totalRelics) {
+                if (this.exitGateMesh) {
+                  this.exitGateMesh.rotation.y = Math.PI / 2;
+                }
+                const idx = this.mazeColliders.indexOf(this.exitGateCollider);
+                if (idx !== -1) this.mazeColliders.splice(idx, 1);
+                document.getElementById('radarLabel').textContent = 'RADAR: MENUJU EXIT';
+              }
+            }
+          }
+
+          if (this.exitTriggerBox && this.exitTriggerBox.containsPoint(this.playerPos)) {
+            if (this.relicsCollected >= totalRelics) {
+              this.triggerWin();
+            }
+          }
+
+          if (this.relicsCollected >= totalRelics) {
+            const pGrid = this.worldToGrid(this.playerPos);
+            const exitGrid = { r: 16, c: 18 };
+            this.mazePathToExit = this.findPathBFS(pGrid, exitGrid);
+          }
+
+          this.drawMinimap();
+        }
+      }
+
+      updateGhost(delta) {
+        if (!this.ghostActive || this.state !== 'PLAYING') return;
+
+        const ghostRobloxSpeed = this.getGhostRobloxSpeed();
+        const ghostWorldSpeed = ghostRobloxSpeed * ROBLOX_SPEED_SCALE;
+
+        let anyGhostNear = false;
+        let caughtByGhost = false;
+
+        for (let i = 0; i < this.ghosts.length; i++) {
+          const ghost = this.ghosts[i];
+          const mesh = ghost.mesh;
+          const ghostWorldPos = mesh.position.clone();
+          ghostWorldPos.y = 0;
+
+          // Calculate BFS path from ghost to player so ghosts never walk through walls
+          const ghostGrid = this.worldToGrid(ghostWorldPos);
+          const playerGrid = this.worldToGrid(this.playerPos);
+          const path = this.findPathBFS(ghostGrid, playerGrid);
+
+          let targetWorldPos = this.playerPos.clone();
+          if (path && path.length > 0) {
+            const nextCell = path[0];
+            targetWorldPos.set(nextCell.c * CELL_SIZE, 0, nextCell.r * CELL_SIZE);
+          }
+
+          targetWorldPos.y = 0;
+          const dir = targetWorldPos.clone().sub(ghostWorldPos);
+          const distToTarget = dir.length();
+
+          if (distToTarget > 0.05) {
+            dir.normalize();
+            const step = Math.min(distToTarget, ghostWorldSpeed * delta);
+            mesh.position.addScaledVector(dir, step);
+            mesh.rotation.y = Math.atan2(dir.x, dir.z);
+          }
+
+          const distToPlayer = mesh.position.clone().setY(0).distanceTo(this.playerPos.clone().setY(0));
+
+          if (distToPlayer < 9.5) {
+            mesh.visible = true;
+            anyGhostNear = true;
+          } else {
+            mesh.visible = false;
+          }
+
+          if (distToPlayer < 1.1) {
+            caughtByGhost = true;
+          }
+        }
+
+        const warnBanner = document.getElementById('proximityWarning');
+        if (warnBanner) {
+          warnBanner.style.display = anyGhostNear ? 'block' : 'none';
+        }
+
+        if (caughtByGhost) {
+          this.triggerGameOver();
+        }
+      }
+
+      drawMinimap() {
+        const rCanvas = document.getElementById('radarCanvas');
+        if (!rCanvas) return;
+        const rctx = rCanvas.getContext('2d');
+        const rw = rCanvas.width;
+        const rh = rCanvas.height;
+
+        rctx.clearRect(0, 0, rw, rh);
+
+        rctx.fillStyle = '#0f1f11';
+        rctx.fillRect(0, 0, rw, rh);
+
+        const rows = this.currentMazeGrid.length;
+        const cols = this.currentMazeGrid[0].length;
+        const cellW = rw / cols;
+        const cellH = rh / rows;
+
+        for (let r = 0; r < rows; r++) {
+          for (let c = 0; c < cols; c++) {
+            if (this.currentMazeGrid[r][c] === 1) {
+              rctx.fillStyle = '#224422';
+              rctx.fillRect(c * cellW, r * cellH, cellW + 0.5, cellH + 0.5);
+            } else if (this.currentMazeGrid[r][c] === 3) {
+              rctx.fillStyle = '#de2d29';
+              rctx.fillRect(c * cellW, r * cellH, cellW, cellH);
+              rctx.fillStyle = '#ffffff';
+              rctx.font = 'bold 8px monospace';
+              rctx.textAlign = 'center';
+              rctx.textBaseline = 'middle';
+              rctx.fillText('EXIT', (c + 0.5) * cellW, (r + 0.5) * cellH);
+            }
+          }
+        }
+
+        this.relics.forEach(relic => {
+          if (relic.visible) {
+            const rc = Math.floor(relic.position.x / CELL_SIZE + 0.5);
+            const rr = Math.floor(relic.position.z / CELL_SIZE + 0.5);
+            rctx.fillStyle = '#ffd700';
+            rctx.beginPath();
+            rctx.arc((rc + 0.5) * cellW, (rr + 0.5) * cellH, 2.5, 0, Math.PI * 2);
+            rctx.fill();
+          }
+        });
+
+        const totalRelics = this.getTotalRelicsForLevel(this.currentLevel);
+        if (this.relicsCollected >= totalRelics && this.mazePathToExit && this.mazePathToExit.length > 0) {
+          rctx.strokeStyle = '#0ebc5f';
+          rctx.lineWidth = 2;
+          rctx.beginPath();
+          for (let i = 0; i < this.mazePathToExit.length; i++) {
+            const pt = this.mazePathToExit[i];
+            const px = (pt.c + 0.5) * cellW;
+            const py = (pt.r + 0.5) * cellH;
+            if (i === 0) rctx.moveTo(px, py);
+            else rctx.lineTo(px, py);
+          }
+          rctx.stroke();
+        }
+
+        if (this.currentLevel >= 2 && this.ghostActive) {
+          const pulseRadius = 3.2 + Math.sin(this.pulseTime * 8) * 1.0;
+          this.ghosts.forEach(ghost => {
+            const gx = (ghost.mesh.position.x / CELL_SIZE + 0.5) * cellW;
+            const gy = (ghost.mesh.position.z / CELL_SIZE + 0.5) * cellH;
+
+            rctx.fillStyle = 'rgba(255, 45, 45, 0.35)';
+            rctx.beginPath();
+            rctx.arc(gx, gy, pulseRadius, 0, Math.PI * 2);
+            rctx.fill();
+
+            rctx.fillStyle = '#ff2a2a';
+            rctx.beginPath();
+            rctx.arc(gx, gy, 2.4, 0, Math.PI * 2);
+            rctx.fill();
+          });
+        }
+
+        const pc = this.playerPos.x / CELL_SIZE + 0.5;
+        const pr = this.playerPos.z / CELL_SIZE + 0.5;
+        const px = pc * cellW;
+        const py = pr * cellH;
+
+        rctx.save();
+        rctx.translate(px, py);
+        rctx.rotate(-this.yaw);
+        rctx.fillStyle = '#3186ff';
+        rctx.beginPath();
+        rctx.moveTo(0, -4);
+        rctx.lineTo(-3, 4);
+        rctx.lineTo(3, 4);
+        rctx.closePath();
+        rctx.fill();
+        rctx.restore();
+      }
+
+      triggerGameOver() {
+        this.state = 'GAMEOVER';
+        const reachedLevel = this.currentLevel;
+        const totalRelics = this.getTotalRelicsForLevel(reachedLevel);
+
+        if (reachedLevel > this.highestLevelReached) {
+          this.highestLevelReached = reachedLevel;
+          localStorage.setItem('lumi_horror_highest_level', this.highestLevelReached.toString());
+        }
+
+        const modal = document.getElementById('modalOverlay');
+        document.getElementById('modalTitle').textContent = 'ANDA TERTANGKAP';
+        document.getElementById('modalTitle').className = 'modal-title game-over-title';
+        document.getElementById('modalSubtitle').textContent = `Setan menangkapmu di Level ${reachedLevel}! Relic terkumpul: ${this.relicsCollected}/${totalRelics}. (Rekor Tertinggi: Level ${this.highestLevelReached}).`;
+        document.getElementById('startBtn').textContent = 'COBA LAGI (LVL 1)';
+        this.updateHudStats();
+        modal.classList.remove('hidden');
+      }
+
+      triggerWin() {
+        this.state = 'WIN';
+        const completedLevel = this.currentLevel;
+
+        if (completedLevel > this.highestLevelReached) {
+          this.highestLevelReached = completedLevel;
+          localStorage.setItem('lumi_horror_highest_level', this.highestLevelReached.toString());
+        }
+
+        this.currentLevel++;
+        const nextSpeed = this.getPlayerRobloxSpeed();
+        const nextGhostSpeed = this.getGhostRobloxSpeed();
+        const nextGhosts = this.getGhostCountForLevel(this.currentLevel);
+        const nextRelics = this.getTotalRelicsForLevel(this.currentLevel);
+        const radarText = this.currentLevel >= 2 ? ' Radar Hantu di Map AKTIF!' : '';
+
+        this.buildMazeForLevel(this.currentLevel);
+
+        const modal = document.getElementById('modalOverlay');
+        document.getElementById('modalTitle').textContent = `LEVEL ${completedLevel} SELESAI!`;
+        document.getElementById('modalTitle').className = 'modal-title win-title';
+        document.getElementById('modalSubtitle').textContent = `Selamat! Lanjut ke Level ${this.currentLevel}: Cari ${nextRelics} Relics, Speed kamu ${nextSpeed}, Hantu (${nextGhostSpeed} Speed) berjumlah ${nextGhosts}.${radarText} (Rekor: Lvl ${this.highestLevelReached})`;
+        document.getElementById('startBtn').textContent = `LANJUT LEVEL ${this.currentLevel}`;
+        this.updateHudStats();
+        modal.classList.remove('hidden');
+      }
+
+      animate() {
+        const clock = new THREE.Clock();
+
+        const loop = () => {
+          requestAnimationFrame(loop);
+          const delta = Math.min(clock.getDelta(), 0.1);
+          this.pulseTime += delta;
+
+          if (this.portalMesh) this.portalMesh.rotation.z += delta * 0.8;
+          this.relics.forEach(r => {
+            if (r.visible) r.rotation.y += delta * 1.5;
+          });
+
+          this.updatePlayer(delta);
+          this.updateGhost(delta);
+
+          this.renderer.render(this.scene, this.camera);
+        };
+
+        loop();
+      }
+    }
+
+    let engine;
+    window.addEventListener('load', () => {
+      if (typeof THREE !== 'undefined') {
+        engine = new GameEngine();
+      } else {
+        console.error('Three.js failed to load.');
+      }
+    });
+
+    const applyTheme = t => {
+      document.documentElement.setAttribute('data-theme', t);
+    };
+    if (!document.documentElement.hasAttribute('data-theme') && window.matchMedia?.('(prefers-color-scheme: dark)').matches) applyTheme('dark');
+    window.addEventListener('message', e => { if (e.data?.type === 'set-theme' || e.data?.type === 'APPLY_THEME') applyTheme(e.data.theme); });
+
+    (function autoResize() {
+      function notifyHeight() {
+        const c = document.querySelector('.widget-container') || document.body;
+        if (!c) return;
+        const h = Math.ceil(Math.max(c.getBoundingClientRect().bottom, c.scrollHeight));
+        window.parent.postMessage({type: 'widget-resize', height: h}, '*');
+      }
+      window.addEventListener('load', () => setTimeout(notifyHeight, 120));
+      new ResizeObserver(() => notifyHeight()).observe(document.querySelector('.widget-container') || document.body);
+    })();
+  </script>
+</body>
+</html>
